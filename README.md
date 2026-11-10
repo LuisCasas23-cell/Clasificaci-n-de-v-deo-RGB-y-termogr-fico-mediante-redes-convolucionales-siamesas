@@ -1,0 +1,2 @@
+# Clasificaci-n-de-v-deo-RGB-y-termogr-fico-mediante-redes-convolucionales-siamesas
+Proyecto de inteligencia artificial para reconocer emociones humanas mediante video RGB, NoIR e información térmica. Integra visión por computadora y redes convolucionales siamesas para analizar rasgos faciales, microexpresiones y variaciones térmicas, ejecutándose en NVIDIA Jetson Nano como sistema multimodal embebido para análisis en tiempo real.
