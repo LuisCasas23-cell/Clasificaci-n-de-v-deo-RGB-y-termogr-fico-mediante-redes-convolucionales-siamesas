@@ -1,409 +1,546 @@
-# Clasificación multimodal RGB, NoIR y termográfica mediante redes convolucionales siamesas
+# Clasificación de Video RGB, NoIR y Termográfico mediante Redes Convolucionales Siamesas
 
-> Proyecto de residencia profesional orientado a la adquisición multimodal de información facial y al desarrollo posterior de un modelo de inteligencia artificial para aprender representaciones de patrones faciales.
+## Descripción del proyecto
 
-## Estado del proyecto
+Este proyecto tiene como objetivo desarrollar un sistema de inteligencia artificial capaz de analizar información visual y térmica para apoyar el reconocimiento de emociones humanas. La propuesta utiliza una arquitectura multimodal compuesta por una cámara RGB, una cámara NoIR y un sensor térmico, procesando cada fuente de información de manera independiente antes de realizar una integración de características.
 
-**Estado actual:** infraestructura de adquisición y dataset **V16.19** estable.
+El sistema se ejecuta principalmente sobre una **NVIDIA Jetson Nano**, donde se realizan tareas de adquisición de video, procesamiento de imágenes, detección de rostros, extracción de características faciales, pruebas de detección de objetos y generación de un conjunto de datos propio.
 
-### Implementado
-
-- Adquisición RGB con cámara IMX219.
-- Adquisición NoIR con cámara OV5647.
-- NVIDIA Jetson Nano como plataforma de adquisición.
-- YOLO11n para detección de personas.
-- MediaPipe Face Landmarker.
-- Representación reducida de **68 landmarks**.
-- **52 blendshapes** faciales.
-- Análisis temporal de candidatos a microexpresiones.
-- Seis representaciones digitales NoIR.
-- Dataset estructurado en Excel.
-- Asociación uno-a-uno de rostros con `P01`, `P02`, ...
-- Fallback de landmarks: LIVE -> frame completo -> ROI YOLO.
-- Control de calidad por canales.
-- Detección de outliers mediante IQR.
-- `group_id` y `subject_group` para evitar contaminación entre conjuntos.
-
-### Pendiente
-
-- Recolección definitiva de un dataset amplio.
-- Integración de la cámara térmica MLX90640.
-- Entrenamiento del encoder ResNet-18.
-- Entrenamiento siamés multimodal.
-- Integración de landmarks, blendshapes y microexpresiones en la red.
-- Transferencia semántica desde datasets emocionales públicos.
-- Evaluación final: accuracy, precision, recall, F1 y matriz de confusión.
+La finalidad es construir una base experimental que permita entrenar posteriormente **redes neuronales convolucionales siamesas**, utilizando tanto características visuales como variaciones térmicas para comparar patrones asociados con diferentes emociones y microexpresiones.
 
 ---
 
-## Arquitectura actual
+## Objetivos
+
+### Objetivo general
+
+Desarrollar un sistema multimodal para la adquisición, procesamiento y clasificación de información RGB, NoIR y térmica orientado al análisis de emociones humanas mediante redes convolucionales siamesas.
+
+### Objetivos específicos
+
+- Capturar video de manera simultánea utilizando cámaras RGB y NoIR.
+- Integrar información térmica mediante el sensor MLX90640.
+- Analizar las diferencias entre el espectro visible y el infrarrojo cercano.
+- Detectar y localizar rostros en tiempo real.
+- Extraer puntos y características faciales relevantes.
+- Identificar microexpresiones y cambios en regiones como cejas y boca.
+- Registrar condiciones adicionales como lentes, barba y cabello sobre la frente.
+- Crear un dataset propio con imágenes y metadatos.
+- Evaluar detección de objetos mediante YOLO.
+- Desarrollar una arquitectura de redes siamesas para comparar características.
+- Integrar las diferentes modalidades en un modelo multimodal.
+
+---
+
+## Arquitectura general del sistema
 
 ```mermaid
 flowchart LR
-    RGB[IMX219 RGB] --> J[Jetson Nano]
-    N[OV5647 NoIR] --> J
-    J --> Y[YOLO11n]
-    J --> L[Laptop]
-    Y --> L
-    L --> MP[MediaPipe]
-    L --> F[6 filtros NoIR]
-    L --> M[Microexpresiones]
-    MP --> D[Dataset V16.19]
-    F --> D
-    M --> D
+    A[Persona] --> B[Cámara RGB IMX219]
+    A --> C[Cámara NoIR OV5647]
+    A --> D[Sensor térmico MLX90640]
+
+    B --> E[Captura CSI / GStreamer]
+    C --> E
+    D --> F[Adquisición térmica I2C]
+
+    E --> G[Preprocesamiento]
+    F --> G
+
+    G --> H[Detección de rostro]
+    H --> I[Landmarks y microexpresiones]
+    H --> J[Detección de objetos YOLO]
+
+    I --> K[Extracción de características]
+    J --> K
+
+    K --> L[Dataset multimodal]
+    L --> M[Redes convolucionales siamesas]
+    M --> N[Fusión de características]
+    N --> O[Clasificación de emociones]
 ```
-
-## Modalidades registradas
-
-Por cada evento se almacenan hasta **8 imágenes**:
-
-1. RGB original.
-2. NoIR original.
-3. NOIR_ORIGINAL.
-4. NOIR_RED.
-5. NOIR_IRCUT.
-6. NOIR_BLUE.
-7. NOIR_IR.
-8. NOIR_UV.
-
-> Los seis filtros NoIR son **transformaciones digitales** derivadas de la misma captura NoIR; no son seis filtros espectrales físicos independientes.
 
 ---
 
-## Estructura del dataset
+## Hardware utilizado
 
-| Hoja | Información |
+| Componente | Modelo | Función |
+|---|---|---|
+| Computadora embebida | NVIDIA Jetson Nano | Procesamiento principal del sistema |
+| Cámara RGB | Sony IMX219 | Captura de información en espectro visible |
+| Cámara NoIR | OmniVision OV5647 | Captura visible + infrarrojo cercano |
+| Sensor térmico | MLX90640 | Captura de distribución térmica |
+| Iluminación IR | Módulo infrarrojo | Apoyo para captura con la cámara NoIR |
+| Computadora externa | Laptop | Visualización, comunicación y pruebas |
+
+---
+
+## Cámaras utilizadas
+
+### Cámara RGB — Sony IMX219
+
+La cámara RGB se utiliza como referencia principal para capturar características visibles del rostro. El sensor IMX219 cuenta con una resolución de hasta **3280 × 2464 píxeles** y utiliza una matriz de color RGB.
+
+En una cámara RGB convencional, el filtro de corte infrarrojo reduce la contribución de radiación IR para mantener una reproducción de color adecuada. Para este proyecto se utiliza principalmente para analizar:
+
+- Color y textura facial.
+- Forma de ojos y cejas.
+- Movimiento de labios.
+- Expresiones faciales.
+- Lentes.
+- Barba.
+- Cabello sobre la frente.
+- Información visual utilizada por los algoritmos de detección.
+
+### Cámara NoIR — OmniVision OV5647
+
+La cámara NoIR utilizada en el proyecto está basada en el sensor **OV5647 de 5 MP**. A diferencia de una cámara RGB convencional, la versión NoIR no utiliza un filtro de bloqueo infrarrojo, por lo que puede captar luz visible y una parte del infrarrojo cercano.
+
+Esta característica permite estudiar información que no siempre se observa de la misma manera en una cámara RGB convencional.
+
+Durante las pruebas se trabajó con:
+
+- Ajustes de ganancia.
+- Compensación de exposición.
+- Iluminación infrarroja externa.
+- Diferentes filtros de visualización.
+- Corrección de orientación.
+- Comparación directa con la cámara RGB.
+
+La interfaz de referencia utilizada para estas pruebas es **NOIR FILTER LAB v8.1**, implementada en el archivo `noir_interface_v8_1.py`.
+
+---
+
+## Comparación del campo espectral RGB vs NoIR
+
+La principal diferencia entre las dos cámaras se encuentra en el rango de radiación que puede llegar al sensor.
+
+| Cámara | Sensor | Región utilizada en el proyecto |
+|---|---|---|
+| RGB | Sony IMX219 | Principalmente visible, aproximadamente 400–700 nm |
+| NoIR | OmniVision OV5647 | Visible + infrarrojo cercano, aproximadamente 400–1000 nm |
+
+> **Importante:** esta comparación representa el rango espectral útil de las cámaras y no una calibración radiométrica. La respuesta exacta del sensor depende de la óptica, filtros, iluminación, configuración de exposición y características específicas del módulo.
+
+### Gráfica comparativa
+
+![Comparación del campo espectral RGB y NoIR](docs/comparacion_espectral_rgb_noir.png)
+
+La región aproximada de **400 a 700 nm** corresponde al espectro visible. La cámara NoIR puede continuar registrando radiación en el infrarrojo cercano por encima de los 700 nm debido a la ausencia del filtro IR-cut.
+
+La cámara térmica MLX90640 pertenece a otra región del espectro y se utiliza para detectar radiación infrarroja térmica emitida por los objetos y el rostro, por lo que su información se procesa de forma independiente antes de la futura fusión multimodal.
+
+---
+
+## Captura de video en Jetson Nano
+
+Las cámaras RGB y NoIR fueron conectadas a la Jetson Nano mediante interfaz **CSI**.
+
+Durante el desarrollo se realizaron pruebas con diferentes configuraciones de GStreamer, incluyendo:
+
+- 1280 × 720 a 30 FPS.
+- 1920 × 1080 a 30 FPS.
+- Formato NV12.
+- Ajustes de exposición.
+- Ajustes de ganancia.
+- Compensación de exposición.
+- Selección independiente de `sensor-id` para cada cámara.
+
+Se comprobó el funcionamiento de las dos cámaras de manera independiente y posteriormente se trabajó en la visualización simultánea para comparar RGB y NoIR.
+
+---
+
+## Procesamiento de la cámara NoIR
+
+Para mejorar la visualización de la cámara NoIR se desarrolló una interfaz con diferentes filtros de procesamiento.
+
+La versión tomada como referencia para el proyecto es:
+
+```text
+NOIR FILTER LAB v8.1
+Archivo: noir_interface_v8_1.py
+```
+
+Esta interfaz contiene **seis filtros** diseñados para analizar diferentes representaciones de la señal obtenida por la cámara NoIR.
+
+También se realizaron pruebas modificando:
+
+- Ganancia.
+- Exposición.
+- Iluminación externa.
+- Intensidad de luz infrarroja.
+- Resolución.
+- FPS.
+- Orientación de la imagen.
+
+En las pruebas se observó una mejora importante utilizando iluminación externa y valores de ganancia mayores. Algunas configuraciones consiguieron un rendimiento cercano a **18 FPS** durante las pruebas de la interfaz.
+
+---
+
+## Detección facial y landmarks
+
+Se probaron diferentes métodos para localizar características del rostro.
+
+### Modelo de 68 puntos
+
+Inicialmente se realizaron pruebas con un modelo facial de **68 landmarks**. Este método permitió localizar zonas como:
+
+- Cejas.
+- Ojos.
+- Nariz.
+- Boca.
+- Contorno facial.
+
+Sin embargo, durante las pruebas con movimiento y especialmente con imágenes NoIR, algunos puntos podían perder estabilidad o desplazarse fuera de la región correcta del rostro.
+
+### MediaPipe
+
+Posteriormente se realizaron pruebas utilizando **MediaPipe**, obteniendo una mayor estabilidad en el seguimiento de las características faciales.
+
+Por esta razón, MediaPipe se tomó como una de las principales alternativas para continuar con:
+
+- Seguimiento facial.
+- Análisis de cejas.
+- Movimiento de labios.
+- Microexpresiones.
+- Extracción de características.
+
+---
+
+## Microexpresiones
+
+El proyecto evolucionó desde una clasificación general de expresiones hacia el análisis de **microexpresiones faciales**.
+
+Para ello se consideran cambios pequeños en regiones específicas del rostro, principalmente:
+
+- Ceja izquierda.
+- Ceja derecha.
+- Ojos.
+- Boca.
+- Comisuras de los labios.
+- Frente.
+
+El objetivo es utilizar estas variaciones como características de entrada para el sistema de aprendizaje.
+
+---
+
+## Detección de objetos con YOLO
+
+También se realizaron pruebas utilizando **YOLO11n de Ultralytics** en la Jetson Nano.
+
+El objetivo de esta etapa fue comprobar si era posible ejecutar simultáneamente:
+
+1. Captura de cámaras.
+2. Detección de personas u objetos.
+3. Procesamiento facial.
+4. Comunicación con una laptop.
+
+Durante las primeras pruebas se obtuvo un rendimiento aproximado de **5 FPS** con YOLO11n en Jetson Nano.
+
+El objetivo de optimización es mejorar el rendimiento sin aumentar excesivamente la temperatura o el consumo de recursos del sistema.
+
+---
+
+## Dataset propio
+
+Una parte importante del proyecto consiste en generar un conjunto de datos propio utilizando las cámaras instaladas en el sistema.
+
+Cada persona se identifica mediante códigos como:
+
+```text
+P01
+P02
+P03
+...
+```
+
+Para cada captura se busca almacenar información como:
+
+| Campo | Descripción |
 |---|---|
-| `CAPTURAS` | Metadatos, calidad, rutas, `group_id`, canales válidos |
-| `PERSONAS` | Pxx, YOLO, rostro, métricas, fuente de landmarks |
-| `LANDMARKS` | 68 puntos, coordenadas absolutas y normalizadas, outliers |
-| `OBJETOS` | Detecciones YOLO |
-| `FILTROS_NOIR` | Resultados por cada variante NoIR |
-| `MICROEXPRESIONES` | Eventos y series temporales |
-| `CALIDAD_DATASET` | Calidad, validez y recomendación de entrenamiento |
+| Persona | Identificador de la persona |
+| Cámara | RGB o NoIR |
+| Microexpresión | Expresión registrada |
+| Ceja izquierda | Características de la región |
+| Ceja derecha | Características de la región |
+| Boca | Características de la región |
+| Lentes | Sí / No |
+| Barba | Sí / No |
+| Cabello en frente | Sí / No |
+| Distancia | Distancia de captura |
+| Filtro | Filtro aplicado |
+| Coordenadas | Información X/Y de características |
+| Imagen | Captura asociada |
 
-### Identificadores
-
-- `group_id`: agrupa todos los derivados de una misma captura.
-- `subject_group`: identifica a la persona (`P01`, `P02`, ...).
-
-Estos campos se utilizarán para que una misma captura o sujeto no contamine simultáneamente `train`, `validation` y `test`.
+Se desarrollaron pruebas para almacenar imágenes directamente dentro de archivos de Excel, manteniéndolas alineadas con la información correspondiente.
 
 ---
 
-## Landmarks
+## Distancia de captura
 
-Cada rostro válido se representa mediante 68 puntos:
-
-$$
-L_i=(x_i,y_i), \qquad i=1,2,\ldots,68
-$$
-
-Matriz facial:
-
-$$
-\mathbf{L}\in\mathbb{R}^{68\times 2}
-$$
-
-Normalización básica respecto a la caja facial:
-
-$$
-x_i^{norm}=\frac{x_i-x_{face}}{w_{face}}
-$$
-
-$$
-y_i^{norm}=\frac{y_i-y_{face}}{h_{face}}
-$$
-
-El landmarker utiliza tres niveles de recuperación:
+Para mantener una mayor consistencia en el dataset se trabajó con un rango aproximado de:
 
 ```text
-LIVE
-  ↓
-FRAME COMPLETO
-  ↓
-ROI YOLO
+30 cm – 60 cm
 ```
 
-Cuando se utiliza ROI, los puntos son remapeados al sistema de coordenadas del frame original.
+La intención es realizar la captura cuando el rostro se encuentre dentro de una distancia válida y evitar registrar muestras demasiado cercanas o demasiado alejadas.
 
 ---
 
-## Control de outliers mediante IQR
+## Captura de múltiples rostros
 
-$$
-IQR = Q_3-Q_1
-$$
+También se trabajó en una interfaz capaz de manejar más de un rostro.
 
-$$
-L_{inf}=Q_1-1.5\,IQR
-$$
+El flujo experimental contempla:
 
-$$
-L_{sup}=Q_3+1.5\,IQR
-$$
+1. Detectar los rostros visibles.
+2. Asignar identificadores.
+3. Mostrar miniaturas de las personas detectadas.
+4. Colocarlas en una fila de espera.
+5. Confirmar los sujetos.
+6. Capturar grupos de hasta tres personas.
+7. Guardar cada rostro detectado y sus metadatos.
 
-Una observación se marca como atípica cuando:
-
-$$
-x<L_{inf}\quad \text{o}\quad x>L_{sup}
-$$
-
-Porcentaje de outliers:
-
-$$
-P_{outlier}=\frac{N_{outlier}}{N_{total}}\times100
-$$
-
-El historial se mantiene separado por modalidad y landmark.
+Esto permite ampliar el dataset y realizar pruebas en escenarios con múltiples personas.
 
 ---
 
-# Modelo propuesto
+## Control de iluminación infrarroja
 
-## Encoder visual
+Se realizaron pruebas para controlar un módulo de iluminación IR utilizando comunicación serial.
 
-Se propone iniciar con **ResNet-18** debido a su menor costo computacional respecto a ResNet-34.
+El módulo cuenta con:
 
 ```text
-Imagen RGB / NoIR / filtro
-          ↓
-      ResNet-18
-          ↓
-        512
-          ↓
-   Linear 512→256
-   BatchNorm + GELU
-          ↓
-   Linear 256→128
-   BatchNorm + GELU
-          ↓
-   Linear 128→64
-          ↓
-   Normalización L2
-          ↓
-    Embedding 64D
+GND
+VCC
+RX
+TX
 ```
 
-### Matrices
+En la Jetson se probaron los pines asociados con TX y RX.
 
-Salida de ResNet-18:
+La lógica propuesta es:
 
-$$
-\mathbf{z}\in\mathbb{R}^{512}
-$$
+```mermaid
+flowchart TD
+    A[Detectar rostro] --> B{¿Distancia correcta?}
+    B -- No --> C[IR encendido]
+    B -- Sí --> D[Preparar captura]
+    D --> E[Apagar o ajustar IR]
+    E --> F[Capturar imagen]
+    F --> C
+```
 
-Primera capa:
-
-$$
-\mathbf{h}_1=GELU(BN(W_1\mathbf{z}+b_1))
-$$
-
-$$
-W_1\in\mathbb{R}^{256\times512}
-$$
-
-Segunda capa:
-
-$$
-\mathbf{h}_2=GELU(BN(W_2\mathbf{h}_1+b_2))
-$$
-
-$$
-W_2\in\mathbb{R}^{128\times256}
-$$
-
-Tercera capa:
-
-$$
-\mathbf{e}=W_3\mathbf{h}_2+b_3
-$$
-
-$$
-W_3\in\mathbb{R}^{64\times128}
-$$
-
-Normalización L2:
-
-$$
-\hat{\mathbf{e}}=\frac{\mathbf{e}}{\|\mathbf{e}\|_2}
-$$
+Este módulo continúa en etapa de pruebas debido a que la comunicación serial y el comportamiento de la iluminación requieren mayor validación.
 
 ---
 
-## Red siamés
+## Comunicación Jetson — Laptop
 
-Dos modalidades del mismo evento se procesan con **pesos compartidos**:
+Se desarrollaron pruebas de comunicación entre la Jetson Nano y una laptop para separar tareas de adquisición y visualización.
 
-$$
-e_A=f_\theta(x_A), \qquad e_B=f_\theta(x_B)
-$$
-
-Distancia euclidiana:
-
-$$
-D(A,B)=\sqrt{\sum_{i=1}^{64}(e_{A,i}-e_{B,i})^2}
-$$
-
-Contrastive loss:
-
-$$
-L=yD^2+(1-y)\max(0,m-D)^2
-$$
-
-El objetivo es aprender un espacio latente donde representaciones relacionadas estén próximas.
-
-> **Importante:** una captura diferente no implica necesariamente una emoción diferente. La construcción de pares negativos deberá realizarse de manera controlada.
-
----
-
-## Matriz de embeddings
-
-Para un batch de tamaño `B`:
-
-$$
-E\in\mathbb{R}^{B\times64}
-$$
-
-Cada fila contiene un embedding aprendido para una muestra.
-
-## Matriz de distancias
-
-$$
-D_{ij}=\|e_i-e_j\|_2
-$$
-
-Esta matriz permitirá analizar similitud entre RGB, NoIR y sus variantes.
-
----
-
-# ¿Cómo se reconocerán felicidad, tristeza o neutralidad?
-
-El dataset propio no obliga al operador a etiquetar manualmente cada captura con una emoción.
-
-Sin embargo, un modelo sin referencias semánticas puede aprender **clusters**, pero no sabe que un cluster debe llamarse `Happiness`, `Sadness` o `Neutral`.
-
-La estrategia propuesta es:
+El flujo general utilizado es:
 
 ```text
-RAF-DB / AffectNet
-        ↓
-Aprendizaje semántico de expresiones
-        ↓
-ResNet-18
-        ↓
-Transferencia al dominio RGB propio
-        ↓
-RGB como referencia semántica
-        ↓
-Alineación RGB ↔ NoIR mediante aprendizaje multimodal
+Cámaras
+   ↓
+Jetson Nano
+   ↓
+Procesamiento
+   ↓
+Servidor / conexión de red
+   ↓
+Laptop
+   ↓
+Visualización y almacenamiento
 ```
 
-La salida final podrá representarse mediante una distribución de probabilidades:
-
-$$
-P(y=k\mid x)=\frac{e^{z_k}}{\sum_j e^{z_j}}
-$$
-
-$$
-\hat y=\arg\max_k P(y=k\mid x)
-$$
-
-Ejemplo **ilustrativo**:
-
-| Expresión | Probabilidad |
-|---|---:|
-| Happiness | 78.4 % |
-| Neutral | 8.1 % |
-| Surprise | 4.1 % |
-| Sadness | 3.2 % |
-| Anger | 2.6 % |
-| Disgust | 1.9 % |
-| Fear | 1.7 % |
-
-> Los valores anteriores son un ejemplo del formato de salida deseado, no resultados experimentales actuales.
+Esta arquitectura permite reducir la cantidad de información mostrada directamente en la Jetson y facilita el monitoreo del sistema desde otra computadora.
 
 ---
 
-# Evaluación prevista
+## Redes convolucionales siamesas
 
-El entrenamiento deberá mostrar disminución simultánea de pérdida de entrenamiento y validación.
+La arquitectura final propuesta utiliza redes convolucionales siamesas.
 
-Métricas de clasificación futuras:
+Una red siamesa contiene dos ramas que comparten los mismos parámetros:
 
-$$
-Accuracy=\frac{TP+TN}{TP+TN+FP+FN}
-$$
+```mermaid
+flowchart LR
+    A[Imagen / muestra A] --> C[CNN compartida]
+    B[Imagen / muestra B] --> D[CNN compartida]
 
-$$
-Precision=\frac{TP}{TP+FP}
-$$
+    C --> E[Vector de características A]
+    D --> F[Vector de características B]
 
-$$
-Recall=\frac{TP}{TP+FN}
-$$
+    E --> G[Función de distancia]
+    F --> G
 
-$$
-F1=2\frac{Precision\cdot Recall}{Precision+Recall}
-$$
-
-También se generarán:
-
-- Curvas `Train Loss` vs `Validation Loss`.
-- Matriz de confusión.
-- Matriz de distancias.
-- Distribución de embeddings.
-- Clusters.
-- Boxplots / IQR por patrón o clase.
-- Comparaciones RGB vs NoIR.
-
----
-
-# Recolección recomendada
-
-Antes del entrenamiento definitivo:
-
-1. Capturar una sola persona física por identificador Pxx.
-2. Realizar múltiples sesiones por persona.
-3. Permitir expresiones y movimientos naturales.
-4. Conservar condiciones como lentes, barba y cabello en frente.
-5. Priorizar muestras con mayor número de canales válidos.
-6. No eliminar automáticamente muestras de baja calidad; mantenerlas documentadas y excluirlas mediante metadatos.
-7. Dividir `train`, `validation` y `test` respetando `group_id` y `subject_group`.
-
----
-
-# Ejecución
-
-Los nombres y comandos concretos pueden cambiar según la versión del código. La configuración actual utiliza tres servicios principales para dataset, preview y stream original.
-
-Ejemplo conceptual de túnel:
-
-```bash
-ssh -N \
-  -R 5050:127.0.0.1:5050 \
-  -R 5051:127.0.0.1:5051 \
-  -R 5052:127.0.0.1:5052 \
-  <usuario>@<host-jetson>
+    G --> H[Similitud / diferencia]
+    H --> I[Clasificación]
 ```
 
-> No publicar direcciones IP, contraseñas ni credenciales reales en el repositorio.
+Cada rama transforma la información de entrada en un vector de características.
+
+Una medida básica de comparación puede representarse mediante distancia euclidiana:
+
+$$
+d(x_1,x_2)=\left\|f(x_1)-f(x_2)\right\|_2
+$$
+
+donde:
+
+- $x_1$ y $x_2$ son las muestras de entrada.
+- $f(x)$ representa la extracción de características.
+- $d$ representa la distancia entre las características obtenidas.
+
+El objetivo es que muestras relacionadas con patrones similares produzcan representaciones cercanas, mientras que muestras diferentes se encuentren más separadas dentro del espacio de características.
 
 ---
 
-# Referencias
+## Fusión multimodal propuesta
 
-1. He, K., Zhang, X., Ren, S., & Sun, J. **Deep Residual Learning for Image Recognition**. https://arxiv.org/abs/1512.03385
-2. PyTorch. **Defining a Neural Network in PyTorch**. https://docs.pytorch.org/tutorials/recipes/recipes/defining_a_neural_network.html
-3. TorchVision. **ResNet-18**. https://docs.pytorch.org/vision/main/models/generated/torchvision.models.resnet18.html
-4. Google AI. **MediaPipe Face Landmarker**. https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker
-5. Ultralytics. **YOLO11**. https://docs.ultralytics.com/models/yolo11/
-6. Juárez-Jiménez et al. **Facial Landmark Visualization and Emotion Recognition Through Neural Networks**. https://arxiv.org/abs/2506.17191
-7. Li et al. **RAF-DB / Reliable Crowdsourcing and Deep Locality-Preserving Learning for Expression Recognition in the Wild**. https://openaccess.thecvf.com/content_cvpr_2017/html/Li_Reliable_Crowdsourcing_and_CVPR_2017_paper.html
-8. Mollahosseini et al. **AffectNet**. https://arxiv.org/abs/1708.03985
+El sistema está diseñado para trabajar con diferentes fuentes de información:
+
+```text
+RGB ───────┐
+           │
+NoIR ──────┼──► Extracción de características ─► Fusión ─► Clasificación
+           │
+Térmica ───┘
+```
+
+La cámara RGB aporta información visual convencional.
+
+La cámara NoIR aporta información visible e infrarroja cercana.
+
+El MLX90640 aporta una matriz térmica que permite analizar cambios de temperatura en diferentes regiones del rostro.
+
+El objetivo final es determinar si la combinación de estas modalidades permite obtener una representación más robusta que utilizar únicamente video RGB.
 
 ---
 
-## Nota
+## Software y tecnologías
 
-Este repositorio se encuentra en fase de investigación y desarrollo. Las categorías emocionales deben interpretarse como **expresiones faciales compatibles con clases aprendidas**, no como una medición infalible del estado emocional interno de una persona.
+Durante el desarrollo se han utilizado o evaluado:
+
+- Python.
+- OpenCV.
+- NumPy.
+- GStreamer.
+- MediaPipe.
+- Ultralytics YOLO11.
+- Pandas.
+- OpenPyXL.
+- Redes neuronales convolucionales.
+- Redes siamesas.
+- Procesamiento digital de imágenes.
+- Comunicación por sockets.
+- Comunicación serial UART.
+- Comunicación I2C.
+
+---
+
+## Estado actual del proyecto
+
+| Módulo | Estado |
+|---|---|
+| Captura RGB | ✅ Funcional |
+| Captura NoIR | ✅ Funcional |
+| Dos cámaras CSI | ✅ Detectadas |
+| Corrección de orientación | ✅ Realizada |
+| Filtros NoIR | ✅ Implementados |
+| NOIR FILTER LAB v8.1 | ✅ Base actual |
+| Replicación de filtros en RGB | 🟡 En desarrollo |
+| Landmarks faciales | ✅ Probados |
+| MediaPipe | ✅ Probado |
+| Detección YOLO11n | ✅ Probada |
+| Dataset personalizado | 🟡 En desarrollo |
+| Captura multirostro | 🟡 En desarrollo |
+| Control de IR | 🟡 En pruebas |
+| Integración MLX90640 | 🟡 En desarrollo |
+| Entrenamiento siamés | ⏳ Etapa posterior |
+| Fusión RGB + NoIR + térmica | ⏳ Etapa posterior |
+| Clasificación final de emociones | ⏳ Etapa posterior |
+
+---
+
+## Estructura recomendada del repositorio
+
+```text
+proyecto/
+│
+├── README.md
+│
+├── docs/
+│   ├── comparacion_espectral_rgb_noir.png
+│   ├── diagramas/
+│   └── capturas/
+│
+├── jetson/
+│   ├── cameras/
+│   ├── noir/
+│   ├── rgb/
+│   └── yolo/
+│
+├── laptop/
+│   └── communication/
+│
+├── dataset/
+│   ├── RGB/
+│   ├── NoIR/
+│   └── thermal/
+│
+├── models/
+│   ├── siamese/
+│   └── yolo/
+│
+└── results/
+    ├── tests/
+    └── measurements/
+```
+
+---
+
+## Próximas etapas
+
+Las siguientes etapas del proyecto contemplan:
+
+- Finalizar la integración del MLX90640.
+- Sincronizar RGB, NoIR y datos térmicos.
+- Mejorar el control automático de iluminación IR.
+- Completar la generación del dataset.
+- Normalizar las características faciales.
+- Definir las clases de microexpresiones.
+- Entrenar las redes siamesas.
+- Comparar rendimiento individual de cada modalidad.
+- Realizar la fusión multimodal.
+- Medir precisión, pérdida, FPS y tiempo de inferencia.
+- Optimizar el modelo para NVIDIA Jetson Nano.
+- Documentar los resultados finales.
+
+---
+
+## Fuentes técnicas de referencia
+
+Para la caracterización del hardware se utilizaron como referencia documentación técnica y publicaciones relacionadas con:
+
+- Sony IMX219.
+- OmniVision OV5647.
+- Raspberry Pi Camera / NoIR.
+- NVIDIA Jetson Nano.
+- Melexis MLX90640.
+- GStreamer.
+- OpenCV.
+- MediaPipe.
+- Ultralytics YOLO.
+
+> Las curvas espectrales y rangos mostrados deben interpretarse como referencia técnica. Una caracterización espectral experimental del sistema completo requeriría iluminación controlada, filtros conocidos y equipo de medición espectral.
+
+---
+
+## Autor
+
+Proyecto de residencia profesional enfocado en inteligencia artificial, visión por computadora, procesamiento de imágenes y análisis multimodal de emociones humanas.
