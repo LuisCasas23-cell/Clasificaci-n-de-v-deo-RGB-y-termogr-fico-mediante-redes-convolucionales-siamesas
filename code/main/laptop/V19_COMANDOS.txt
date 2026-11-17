@@ -1,0 +1,175 @@
+V16.19 - CONTROL DE CALIDAD DEL DATASET
+=========================================
+
+EJECUTAR:
+py -3.13 .\V19.py
+
+
+OBJETIVO
+--------
+Esta version parte de V16.18 y NO cambia:
+- camaras
+- Jetson
+- YOLO11n
+- landmarker
+- GUARDAR LOTE
+- filtros NoIR
+- microexpresiones
+- blendshapes
+- asignacion P01/P02/...
+
+Solo agrega control de calidad para preparar el dataset antes del entrenamiento.
+
+
+NUEVO DATASET
+-------------
+dataset_rgb_noir_micro_v16_19_calidad
+
+EXCEL:
+registro_dataset_rgb_noir_micro_v16_19_calidad.xlsx
+
+
+NUEVA HOJA
+-----------
+CALIDAD_DATASET
+
+Por cada Pxx y captura guarda:
+- session_id
+- group_id
+- capture_id
+- person_id
+- subject_group
+- valid_channels_count
+- valid_channels_total
+- valid_channels_ratio
+- landmark_rows
+- outlier_count
+- outlier_ratio
+- history_reference_min_n
+- quality_status
+- recommended_for_training
+
+
+CANALES
+-------
+Cada persona tiene hasta 8 canales:
+
+1. RGB
+2. NOIR
+3. NOIR_ORIGINAL
+4. NOIR_RED
+5. NOIR_IRCUT
+6. NOIR_BLUE
+7. NOIR_IR
+8. NOIR_UV
+
+
+QUALITY_STATUS
+--------------
+COMPLETO:
+8/8 canales con 68 landmarks.
+
+BUENO:
+al menos 75% de canales validos.
+
+PARCIAL:
+al menos 50% de canales validos.
+
+BAJO:
+menos de 50% de canales validos.
+
+REVISAR_OUTLIERS:
+hay suficiente historial y demasiados landmarks atipicos.
+
+
+OUTLIERS IQR
+------------
+El sistema compara cada landmark solamente contra el historial del
+MISMO punto y de la MISMA fuente.
+
+Ejemplo:
+RGB punto 33 solo se compara contra:
+RGB punto 33 de capturas anteriores.
+
+NOIR_RED punto 33 solo se compara contra:
+NOIR_RED punto 33 de capturas anteriores.
+
+No se mezclan RGB, NoIR ni filtros.
+
+El IQR empieza a marcar outliers solamente cuando existen al menos
+8 referencias anteriores del mismo punto.
+
+Formula:
+Q1 - 1.5*IQR
+Q3 + 1.5*IQR
+
+
+LANDMARKS
+---------
+Se agregan:
+- iqr_reference_n
+- is_outlier_iqr
+
+
+PERSONAS
+--------
+Se agregan:
+- subject_group
+- landmark_outlier_count
+- landmark_outlier_ratio
+- normalized_valid
+
+
+FILTROS_NOIR
+------------
+Se agregan:
+- group_id
+- subject_group
+- landmark_outlier_count
+- landmark_outlier_ratio
+- normalized_valid
+
+
+CAPTURAS
+--------
+Se agregan:
+- group_id
+- selected_people_count
+- valid_channels_count
+- valid_channels_total
+- valid_channels_ratio
+- dataset_quality_status
+
+
+GROUP_ID / SUBJECT_GROUP
+------------------------
+group_id = capture_id
+
+Todos los derivados de una misma captura comparten el mismo group_id.
+
+subject_group = Pxx
+
+Esto permitirá que cuando preparemos TRAIN / VALIDATION / TEST,
+no mezclemos accidentalmente derivados de la misma captura entre
+conjuntos.
+
+
+ARCHIVO DE HISTORIAL
+--------------------
+landmark_qc_history_v16_19.json
+
+Guarda hasta 200 valores históricos por landmark/fuente para el
+control IQR.
+
+No contiene etiquetas de emociones.
+
+
+IMPORTANTE
+----------
+Esta version NO agrega:
+- feliz
+- triste
+- enojado
+- neutral
+- emotion_label
+- ninguna etiqueta manual de emocion
