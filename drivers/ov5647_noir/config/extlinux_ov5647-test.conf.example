@@ -1,0 +1,6 @@
+LABEL ov5647-test
+  MENU LABEL IMX219 + OV5647 test
+  LINUX /boot/Image
+  INITRD /boot/initrd
+  FDT /boot/tegra210-p3448-0000-p3449-0000-b00-imx219-ov5647.dtb
+  APPEND ${cbootargs} quiet root=/dev/mmcblk0p1 rw rootwait rootfstype=ext4 console=ttyS0,115200n8 console=tty0 fbcon=map:0 net.ifnames=0
